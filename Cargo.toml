@@ -1,6 +1,6 @@
 [package]
 name = "kalman"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Alejandro Sempere <asempere158@gmail.com>"]
 description = "A Rust implementation of the Kalman filter"
@@ -13,7 +13,7 @@ keywords = ["kalman", "estimation", "linear-algebra", "tracking", "filtering"]
 categories = ["science", "algorithms", "mathematics"]
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 nalgebra = { version = "0.34", default-features = false, features = ["libm"] }

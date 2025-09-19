@@ -4,8 +4,8 @@ use nalgebra::{SMatrix, SVector};
 #[derive(Debug, Clone)]
 pub struct KalmanFilter<const X_DIM: usize, const MEAS_DIM: usize, F, G>
 where
-    F: Fn(f64) -> SMatrix<f64, X_DIM, X_DIM>,
-    G: Fn(f64) -> SMatrix<f64, MEAS_DIM, X_DIM>,
+    F: Fn(f64, &SVector<f64, X_DIM>) -> SMatrix<f64, X_DIM, X_DIM>,
+    G: Fn(f64, &SVector<f64, X_DIM>) -> SMatrix<f64, X_DIM, MEAS_DIM>,
 {
     x: SVector<f64, X_DIM>,             // State vector
     p: SMatrix<f64, X_DIM, X_DIM>,      // Covariance matrix
@@ -16,8 +16,8 @@ where
 
 impl<const X_DIM: usize, const MEAS_DIM: usize, F, G> KalmanFilter<X_DIM, MEAS_DIM, F, G>
 where
-    F: Fn(f64) -> SMatrix<f64, X_DIM, X_DIM>,
-    G: Fn(f64) -> SMatrix<f64, MEAS_DIM, X_DIM>,
+    F: Fn(f64, &SVector<f64, X_DIM>) -> SMatrix<f64, X_DIM, X_DIM>,
+    G: Fn(f64, &SVector<f64, X_DIM>) -> SMatrix<f64, X_DIM, MEAS_DIM>,
 {
     pub fn new(
         initial: SVector<f64, X_DIM>,
@@ -36,8 +36,8 @@ where
     }
 
     pub fn predict(&mut self, z: SVector<f64, MEAS_DIM>, z_sd: SVector<f64, MEAS_DIM>, dt: f64) {
-        let f = (self.f)(dt);
-        let g = (self.g)(dt);
+        let f = (self.f)(dt, &self.x);
+        let g = (self.g)(dt, &self.x);
         let q = self.q.call(&g);
 
         // Predict state
@@ -47,13 +47,13 @@ where
         // Measurement noise covariance from sd
         let r = SMatrix::from_diagonal(&z_sd.component_mul(&z_sd));
         // Kalman gain
-        let s = g * self.p * g.transpose() + r;
-        let k = self.p * g.transpose() * s.try_inverse().unwrap_or(SMatrix::zeros());
+        let s = g.transpose() * self.p * g + r;
+        let k = self.p * g * s.try_inverse().unwrap_or(SMatrix::zeros());
 
         // Update state
-        let y = z - g * self.x;
+        let y = z - g.tr_mul(&self.x);
         self.x = self.x + k * y;
-        self.p = (SMatrix::identity() - k * g) * self.p;
+        self.p = (SMatrix::identity() - k * g.transpose()) * self.p;
     }
 
     pub fn state(&self) -> &SVector<f64, X_DIM> {
@@ -69,11 +69,11 @@ struct ProcessNoiseFn<const X_DIM: usize, const MEAS_DIM: usize> {
 impl<const X_DIM: usize, const MEAS_DIM: usize> ProcessNoiseFn<X_DIM, MEAS_DIM> {
     fn call(
         &self,
-        measurement_model: &SMatrix<f64, MEAS_DIM, X_DIM>,
+        measurement_model: &SMatrix<f64, X_DIM, MEAS_DIM>,
     ) -> SMatrix<f64, X_DIM, X_DIM> {
         // https://en.wikipedia.org/wiki/Kalman_filter#Example_application,_technical
         // Q = G * Gt * variance formula
-        measurement_model.tr_mul(measurement_model) * self.variance
+        measurement_model * measurement_model.transpose() * self.variance
     }
 }
 
@@ -83,7 +83,8 @@ mod tests {
     use rand_distr::{Distribution, Normal};
 
     #[test]
-    fn it_works() {
+    fn test_mrua() {
+        // test agains linear acceleration
         let mut diff = f64::MAX;
         let dt = 0.1;
         let steps = 1_000_000;
@@ -94,8 +95,10 @@ mod tests {
         let mut kf = KalmanFilter::new(
             SVector::from_row_slice(&[0., 0., 0.]),
             &SVector::from_row_slice(&[1e12, 0., 0.]),
-            |dt| SMatrix::from_row_slice(&[1.0, dt, 0.5 * dt * dt, 0.0, 1.0, dt, 0.0, 0.0, 1.0]),
-            |_dt| SMatrix::identity(),
+            |dt, _state| {
+                SMatrix::from_row_slice(&[1.0, dt, 0.5 * dt * dt, 0.0, 1.0, dt, 0.0, 0.0, 1.0])
+            },
+            |_dt, _state| SMatrix::identity(),
             1e-10,
         );
 
@@ -124,5 +127,108 @@ mod tests {
         }
 
         assert!(diff < 0.5);
+    }
+
+    #[test]
+    fn test_mcu() {
+        // Test against circular motion
+        let mut dist = f64::MAX;
+        let mut rng = rand::rng();
+
+        let dt = 0.1;
+        let iterations = 1_000_000;
+        let sd = 2.;
+        let noise = Normal::new(0., sd).unwrap();
+
+        let radious = 1.;
+
+        let rotational_velocity = 1.;
+        let mut rotation = 0.;
+
+        let mut pos_x = 0.;
+        let mut pos_y = 0.;
+        let velocity: f64 = 1.;
+        let acceleration = velocity.powi(2) / radious;
+
+        let mut kf: KalmanFilter<6, 5, _, _> = KalmanFilter::new(
+            SVector::from_row_slice(&[
+                pos_x,
+                pos_y,
+                rotation,
+                rotational_velocity,
+                velocity,
+                acceleration,
+            ]),
+            &SVector::from_row_slice(&[0., 0., 0., 0., 0., 0.]),
+            |dt, state| {
+                SMatrix::from_row_slice(&[
+                    1.,
+                    0.,
+                    0.,
+                    0.,
+                    state[2].cos() * dt,
+                    state[2].cos() * dt.powi(2) * 0.5,
+                    0.,
+                    1.,
+                    0.,
+                    0.,
+                    state[2].sin() * dt,
+                    state[2].sin() * dt.powi(2) * 0.5,
+                    0.,
+                    0.,
+                    1.,
+                    dt,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    1.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    1.,
+                    dt,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    1.,
+                ])
+            },
+            |dt, _state| {
+                SMatrix::from_row_slice(&[
+                    1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., dt, 0., 0., 0., 0., 1., 0.,
+                    0., 0., 0., 0., dt, 0., 0., 0., 0., 1.,
+                ])
+            },
+            1e-10,
+        );
+
+        for i in 0..=iterations {
+            let t = dt * (i as f64);
+            rotation = rotational_velocity * t;
+            pos_x = rotation.cos() * radious;
+            pos_y = rotation.sin() * radious;
+
+            let meas = SVector::from_row_slice(&[
+                pos_x + noise.sample(&mut rng),
+                pos_y + noise.sample(&mut rng),
+                rotation + noise.sample(&mut rng),
+                rotational_velocity + noise.sample(&mut rng),
+                acceleration + noise.sample(&mut rng),
+            ]);
+            let meas_sd = SVector::from_row_slice(&[sd, sd, sd, sd, sd]);
+            kf.predict(meas, meas_sd, dt);
+
+            let state = kf.state();
+            dist = ((state[0] - pos_x).powi(2) + (state[1] - pos_y).powi(2)).sqrt();
+        }
+
+        assert!(dist < 1.5);
     }
 }
