@@ -1,0 +1,23 @@
+[package]
+name = "kalman"
+version = "0.1.0"
+edition = "2024"
+authors = ["Alejandro Sempere <asempere158@gmail.com>"]
+description = "A Rust implementation of the Kalman filter"
+license = "MIT"
+repository = "https://github.com/Asempere123123/kalman"
+homepage = "https://github.com/Asempere123123/kalman"
+documentation = "https://docs.rs/kalman"
+readme = "README.md"
+keywords = ["kalman", "filter", "estimation", "linear-algebra", "tracking", "filtering"]
+categories = ["science", "algorithms", "mathematics"]
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+nalgebra = { version = "0.34", default-features = false, features = ["libm"] }
+
+[dev-dependencies]
+rand = "0.9.2"
+rand_distr = "0.5.1"
