@@ -9,7 +9,7 @@ repository = "https://github.com/Asempere123123/kalman"
 homepage = "https://github.com/Asempere123123/kalman"
 documentation = "https://docs.rs/kalman"
 readme = "README.md"
-keywords = ["kalman", "filter", "estimation", "linear-algebra", "tracking", "filtering"]
+keywords = ["kalman", "estimation", "linear-algebra", "tracking", "filtering"]
 categories = ["science", "algorithms", "mathematics"]
 
 [lib]
